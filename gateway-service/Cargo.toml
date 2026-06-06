@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 actix-web       = "4"
 actix-multipart = "0.7"
+actix-web-lab   = "0.20"
 sqlx            = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "macros", "uuid"] }
 tokio           = { version = "1",   features = ["full"] }
 reqwest         = { version = "0.11", features = ["json", "multipart"] }
@@ -18,3 +19,6 @@ uuid            = { version = "1",   features = ["v4", "serde"] }
 csv             = "1"
 futures-util    = "0.3"
 chrono          = { version = "0.4", features = ["serde"] }
+log             = "0.4"
+env_logger      = "0.11"
+actix-cors = "0.7"

@@ -35,8 +35,7 @@ pub async fn create_user(
     };
 
     let result = sqlx::query(
-        "INSERT INTO users (username, email, password_hash, role)
-         VALUES ($1, $2, $3, $4)",
+        "INSERT INTO users (username, email, password_hash, role) VALUES ($1, $2, $3, $4)",
     )
     .bind(&request.name)
     .bind(&request.email)
@@ -47,15 +46,13 @@ pub async fn create_user(
 
     match result {
         Ok(_)  => HttpResponse::Created()
-            .json(serde_json::json!({ "status": "user created" })),
+            .json(serde_json::json!({ "status": "user created", "role": role })),
         Err(e) => {
             let msg = e.to_string();
             if msg.contains("unique") || msg.contains("duplicate") {
-                HttpResponse::Conflict()
-                    .body("Username or email already exists")
+                HttpResponse::Conflict().body("Username or email already exists")
             } else {
-                HttpResponse::InternalServerError()
-                    .body("Failed to create user")
+                HttpResponse::InternalServerError().body("Failed to create user")
             }
         }
     }

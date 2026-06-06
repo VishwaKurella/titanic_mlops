@@ -1,0 +1,875 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ML Platform Admin</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+    <style>
+      :root {
+        --bg: #f9fafb;
+        --card: #fff;
+        --text: #111827;
+        --muted: #6b7280;
+        --border: #e5e7eb;
+        --accent: #4f46e5;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0f0f11;
+          --card: #18181b;
+          --text: #f4f4f5;
+          --muted: #a1a1aa;
+          --border: #27272a;
+          --accent: #6366f1;
+        }
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        font-family:
+          system-ui,
+          -apple-system,
+          sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      input,
+      button {
+        font-family: inherit;
+      }
+      @keyframes slideUp {
+        from {
+          opacity: 0;
+          transform: translateY(10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="text/babel">
+      const API = "http://localhost:8080";
+
+      const api = {
+        async post(path, body, token) {
+          const r = await fetch(`${API}${path}`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify(body),
+          });
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(data.error || r.statusText);
+          return data;
+        },
+        async get(path, token) {
+          const r = await fetch(`${API}${path}`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          });
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(data.error || r.statusText);
+          return data;
+        },
+      };
+
+      const { useState, useEffect, useCallback } = React;
+
+      function Badge({ color, children }) {
+        const c = {
+          green: { background: "#d1fae5", color: "#065f46" },
+          gray: { background: "#f3f4f6", color: "#374151" },
+          blue: { background: "#dbeafe", color: "#1e40af" },
+          amber: { background: "#fef3c7", color: "#92400e" },
+          red: { background: "#fee2e2", color: "#991b1b" },
+        };
+        return (
+          <span
+            style={{
+              ...(c[color] || c.gray),
+              padding: "2px 10px",
+              borderRadius: 12,
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+          >
+            {children}
+          </span>
+        );
+      }
+
+      function Toast({ message, type, onClose }) {
+        useEffect(() => {
+          const t = setTimeout(onClose, 3500);
+          return () => clearTimeout(t);
+        }, [onClose]);
+        const c = { success: "#10b981", error: "#ef4444", info: "#3b82f6" };
+        return (
+          <div
+            style={{
+              position: "fixed",
+              bottom: 28,
+              right: 28,
+              zIndex: 999,
+              background: c[type] || c.info,
+              color: "#fff",
+              padding: "12px 20px",
+              borderRadius: 10,
+              fontSize: 14,
+              fontWeight: 500,
+              boxShadow: "0 4px 20px rgba(0,0,0,0.15)",
+              animation: "slideUp 0.25s ease",
+            }}
+          >
+            {message}
+          </div>
+        );
+      }
+
+      const inp = {
+        width: "100%",
+        padding: "10px 12px",
+        border: "1px solid var(--border)",
+        borderRadius: 8,
+        fontSize: 14,
+        color: "var(--text)",
+        background: "var(--bg)",
+        outline: "none",
+      };
+      const lbl = {
+        display: "block",
+        fontSize: 13,
+        fontWeight: 500,
+        color: "var(--text)",
+        marginBottom: 6,
+      };
+      const btn = {
+        padding: "9px 18px",
+        background: "var(--accent)",
+        color: "#fff",
+        border: "none",
+        borderRadius: 8,
+        fontSize: 14,
+        fontWeight: 600,
+        cursor: "pointer",
+      };
+
+      function Login({ onLogin }) {
+        const [email, setEmail] = useState("");
+        const [password, setPassword] = useState("");
+        const [error, setError] = useState("");
+        const [loading, setLoading] = useState(false);
+
+        async function submit(e) {
+          e.preventDefault();
+          setLoading(true);
+          setError("");
+          try {
+            const d = await api.post("/auth/login", {
+              email: email,
+              password: password,
+            });
+            if (d.role !== "ADMIN") {
+              setError("Admin access required");
+              return;
+            }
+            onLogin(d.token, d.username);
+          } catch (e) {
+            setError(e.message);
+          } finally {
+            setLoading(false);
+          }
+        }
+
+        return (
+          <div
+            style={{
+              minHeight: "100vh",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background: "var(--bg)",
+            }}
+          >
+            <div
+              style={{
+                background: "var(--card)",
+                borderRadius: 16,
+                padding: "48px 40px",
+                width: 380,
+                boxShadow: "0 8px 32px rgba(0,0,0,0.06)",
+                border: "1px solid var(--border)",
+              }}
+            >
+              <div style={{ marginBottom: 32 }}>
+                <div
+                  style={{
+                    width: 40,
+                    height: 40,
+                    background: "var(--accent)",
+                    borderRadius: 10,
+                    marginBottom: 16,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <svg
+                    width="22"
+                    height="22"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="white"
+                    strokeWidth="2"
+                  >
+                    <path d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18" />
+                  </svg>
+                </div>
+                <h1
+                  style={{
+                    fontSize: 22,
+                    fontWeight: 700,
+                    color: "var(--text)",
+                  }}
+                >
+                  ML Platform
+                </h1>
+                <p
+                  style={{ marginTop: 6, color: "var(--muted)", fontSize: 14 }}
+                >
+                  Admin dashboard
+                </p>
+              </div>
+              {error && (
+                <div
+                  style={{
+                    background: "#fee2e2",
+                    color: "#991b1b",
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    fontSize: 13,
+                    marginBottom: 20,
+                  }}
+                >
+                  {error}
+                </div>
+              )}
+              <form onSubmit={submit}>
+                <label style={lbl}>Email</label>
+                <input
+                  style={inp}
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  placeholder="admin@example.com"
+                />
+                <label style={{ ...lbl, marginTop: 16 }}>Password</label>
+                <input
+                  style={inp}
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  placeholder="••••••••"
+                />
+                <button
+                  type="submit"
+                  disabled={loading}
+                  style={{
+                    ...btn,
+                    width: "100%",
+                    marginTop: 24,
+                    opacity: loading ? 0.7 : 1,
+                  }}
+                >
+                  {loading ? "Signing in…" : "Sign in"}
+                </button>
+              </form>
+            </div>
+          </div>
+        );
+      }
+
+      function Dashboard({ token, username, onLogout }) {
+        const [tab, setTab] = useState("models");
+        const [models, setModels] = useState([]);
+        const [runs, setRuns] = useState([]);
+        const [loading, setLoading] = useState(false);
+        const [toast, setToast] = useState(null);
+        const [initLoading, setInitLoading] = useState(false);
+        const [csvFile, setCsvFile] = useState(null);
+        const [trainLoading, setTrainLoading] = useState(false);
+
+        const toast_ = (m, t = "success") => setToast({ message: m, type: t });
+
+        const loadModels = useCallback(async () => {
+          setLoading(true);
+          try {
+            setModels(await api.get("/models", token));
+          } catch (e) {
+            toast_(e.message, "error");
+          } finally {
+            setLoading(false);
+          }
+        }, [token]);
+
+        const loadRuns = useCallback(async () => {
+          try {
+            const r = await fetch(`${API}/training-runs`, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            if (r.ok) setRuns(await r.json());
+          } catch (_) {}
+        }, [token]);
+
+        useEffect(() => {
+          loadModels();
+          loadRuns();
+        }, [loadModels, loadRuns]);
+
+        async function activate(name) {
+          try {
+            await api.post(`/activate/${name}`, {}, token);
+            toast_(`Activated "${name}"`);
+            loadModels();
+          } catch (e) {
+            toast_(e.message, "error");
+          }
+        }
+
+        async function initBase() {
+          setInitLoading(true);
+          try {
+            const d = await api.post("/initBaseModel", {}, token);
+            toast_(
+              `Trained: ${d.model_name} (${(d.accuracy * 100).toFixed(1)}% acc)`,
+            );
+            loadModels();
+            loadRuns();
+          } catch (e) {
+            toast_(e.message, "error");
+          } finally {
+            setInitLoading(false);
+          }
+        }
+
+        async function trainCsv() {
+          if (!csvFile) return toast_("Select a CSV file first", "info");
+          setTrainLoading(true);
+          try {
+            const form = new FormData();
+            form.append("file", csvFile);
+            const r = await fetch(`${API}/train`, {
+              method: "POST",
+              headers: { Authorization: `Bearer ${token}` },
+              body: form,
+            });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(d.error || r.statusText);
+            toast_(
+              `Trained: ${d.model_name} (${(d.accuracy * 100).toFixed(1)}% acc)`,
+            );
+            setCsvFile(null);
+            loadModels();
+            loadRuns();
+          } catch (e) {
+            toast_(e.message, "error");
+          } finally {
+            setTrainLoading(false);
+          }
+        }
+
+        const active = models.find((m) => m.active);
+
+        const TH = ({ children }) => (
+          <th
+            style={{
+              padding: "12px 16px",
+              textAlign: "left",
+              fontSize: 12,
+              fontWeight: 600,
+              color: "var(--muted)",
+              textTransform: "uppercase",
+              letterSpacing: "0.05em",
+            }}
+          >
+            {children}
+          </th>
+        );
+        const TD = ({ children, mono }) => (
+          <td
+            style={{
+              padding: "13px 16px",
+              fontSize: 13,
+              color: "var(--text)",
+              fontFamily: mono ? "monospace" : "inherit",
+            }}
+          >
+            {children}
+          </td>
+        );
+
+        return (
+          <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
+            {/* header */}
+            <div
+              style={{
+                background: "var(--card)",
+                borderBottom: "1px solid var(--border)",
+                padding: "0 32px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                height: 60,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div
+                  style={{
+                    width: 28,
+                    height: 28,
+                    background: "var(--accent)",
+                    borderRadius: 7,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <svg
+                    width="16"
+                    height="16"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="white"
+                    strokeWidth="2.2"
+                  >
+                    <path d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18" />
+                  </svg>
+                </div>
+                <span style={{ fontWeight: 700, fontSize: 15 }}>
+                  ML Platform
+                </span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                <span style={{ fontSize: 13, color: "var(--muted)" }}>
+                  Signed in as{" "}
+                  <strong style={{ color: "var(--text)" }}>{username}</strong>
+                </span>
+                <button
+                  onClick={onLogout}
+                  style={{
+                    ...btn,
+                    background: "transparent",
+                    color: "var(--muted)",
+                    border: "1px solid var(--border)",
+                    padding: "6px 14px",
+                    fontSize: 13,
+                  }}
+                >
+                  Sign out
+                </button>
+              </div>
+            </div>
+
+            <div
+              style={{ maxWidth: 1100, margin: "0 auto", padding: "32px 24px" }}
+            >
+              {/* summary cards */}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(3,1fr)",
+                  gap: 16,
+                  marginBottom: 32,
+                }}
+              >
+                {[
+                  {
+                    label: "Active model",
+                    value: active?.model_name ?? "None",
+                    sub: active
+                      ? `${(active.accuracy * 100).toFixed(1)}% accuracy`
+                      : "Run init base model",
+                  },
+                  {
+                    label: "Total models",
+                    value: models.length,
+                    sub: `${models.filter((m) => !m.active).length} inactive`,
+                  },
+                  {
+                    label: "Training runs",
+                    value: runs.length,
+                    sub: runs[0]
+                      ? `Last: ${new Date(runs[0].created_at).toLocaleDateString()}`
+                      : "No runs yet",
+                  },
+                ].map((c) => (
+                  <div
+                    key={c.label}
+                    style={{
+                      background: "var(--card)",
+                      borderRadius: 12,
+                      padding: "20px 24px",
+                      border: "1px solid var(--border)",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 12,
+                        color: "var(--muted)",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.06em",
+                        marginBottom: 8,
+                      }}
+                    >
+                      {c.label}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 20,
+                        fontWeight: 700,
+                        wordBreak: "break-all",
+                      }}
+                    >
+                      {c.value}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 12,
+                        color: "var(--muted)",
+                        marginTop: 4,
+                      }}
+                    >
+                      {c.sub}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* actions */}
+              <div
+                style={{
+                  background: "var(--card)",
+                  borderRadius: 12,
+                  padding: "20px 24px",
+                  border: "1px solid var(--border)",
+                  marginBottom: 24,
+                }}
+              >
+                <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 16 }}>
+                  Training actions
+                </h2>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 16,
+                    flexWrap: "wrap",
+                    alignItems: "center",
+                  }}
+                >
+                  <button
+                    onClick={initBase}
+                    disabled={initLoading}
+                    style={{ ...btn, opacity: initLoading ? 0.7 : 1 }}
+                  >
+                    {initLoading ? "Training…" : "Init base model"}
+                  </button>
+                  <label
+                    style={{
+                      ...btn,
+                      background: "transparent",
+                      color: "var(--text)",
+                      border: "1px solid var(--border)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {csvFile ? `📄 ${csvFile.name}` : "Upload CSV"}
+                    <input
+                      type="file"
+                      accept=".csv"
+                      style={{ display: "none" }}
+                      onChange={(e) => setCsvFile(e.target.files[0])}
+                    />
+                  </label>
+                  {csvFile && (
+                    <button
+                      onClick={trainCsv}
+                      disabled={trainLoading}
+                      style={{
+                        ...btn,
+                        background: "#059669",
+                        opacity: trainLoading ? 0.7 : 1,
+                      }}
+                    >
+                      {trainLoading ? "Training…" : "Train on CSV"}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      loadModels();
+                      loadRuns();
+                    }}
+                    style={{
+                      ...btn,
+                      background: "transparent",
+                      color: "var(--muted)",
+                      border: "1px solid var(--border)",
+                      marginLeft: "auto",
+                    }}
+                  >
+                    ↻ Refresh
+                  </button>
+                </div>
+              </div>
+
+              {/* tabs */}
+              <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
+                {["models", "runs"].map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => setTab(t)}
+                    style={{
+                      padding: "8px 18px",
+                      borderRadius: 8,
+                      border: "none",
+                      cursor: "pointer",
+                      fontSize: 14,
+                      fontWeight: tab === t ? 600 : 400,
+                      background: tab === t ? "var(--accent)" : "transparent",
+                      color: tab === t ? "#fff" : "var(--muted)",
+                    }}
+                  >
+                    {t === "models" ? "Models" : "Training runs"}
+                  </button>
+                ))}
+              </div>
+
+              {/* models table */}
+              {tab === "models" && (
+                <div
+                  style={{
+                    background: "var(--card)",
+                    borderRadius: 12,
+                    border: "1px solid var(--border)",
+                    overflow: "hidden",
+                  }}
+                >
+                  {loading ? (
+                    <div
+                      style={{
+                        padding: 40,
+                        textAlign: "center",
+                        color: "var(--muted)",
+                      }}
+                    >
+                      Loading…
+                    </div>
+                  ) : models.length === 0 ? (
+                    <div
+                      style={{
+                        padding: 40,
+                        textAlign: "center",
+                        color: "var(--muted)",
+                      }}
+                    >
+                      No models yet. Click "Init base model" to start.
+                    </div>
+                  ) : (
+                    <table
+                      style={{ width: "100%", borderCollapse: "collapse" }}
+                    >
+                      <thead>
+                        <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                          <TH>Model name</TH>
+                          <TH>Status</TH>
+                          <TH>Accuracy</TH>
+                          <TH>F1</TH>
+                          <TH>Rows</TH>
+                          <TH>Created</TH>
+                          <TH></TH>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {models.map((m, i) => (
+                          <tr
+                            key={m.id}
+                            style={{
+                              borderBottom:
+                                i < models.length - 1
+                                  ? "1px solid var(--border)"
+                                  : "none",
+                              background: m.active
+                                ? "rgba(16,185,129,0.04)"
+                                : "transparent",
+                            }}
+                          >
+                            <TD mono>{m.model_name}</TD>
+                            <TD>
+                              <Badge color={m.active ? "green" : "gray"}>
+                                {m.active ? "Active" : "Inactive"}
+                              </Badge>
+                            </TD>
+                            <TD>
+                              {m.accuracy != null
+                                ? `${(m.accuracy * 100).toFixed(1)}%`
+                                : "—"}
+                            </TD>
+                            <TD>
+                              {m.f1_score != null ? m.f1_score.toFixed(3) : "—"}
+                            </TD>
+                            <TD>{m.training_rows?.toLocaleString() ?? "—"}</TD>
+                            <TD>{new Date(m.created_at).toLocaleString()}</TD>
+                            <td style={{ padding: "13px 16px" }}>
+                              {!m.active && (
+                                <button
+                                  onClick={() => activate(m.model_name)}
+                                  style={{
+                                    padding: "5px 14px",
+                                    fontSize: 12,
+                                    fontWeight: 600,
+                                    borderRadius: 6,
+                                    border: "1px solid var(--accent)",
+                                    color: "var(--accent)",
+                                    background: "transparent",
+                                    cursor: "pointer",
+                                  }}
+                                >
+                                  Activate
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              )}
+
+              {/* runs table */}
+              {tab === "runs" && (
+                <div
+                  style={{
+                    background: "var(--card)",
+                    borderRadius: 12,
+                    border: "1px solid var(--border)",
+                    overflow: "hidden",
+                  }}
+                >
+                  {runs.length === 0 ? (
+                    <div
+                      style={{
+                        padding: 40,
+                        textAlign: "center",
+                        color: "var(--muted)",
+                      }}
+                    >
+                      No training runs yet.
+                    </div>
+                  ) : (
+                    <table
+                      style={{ width: "100%", borderCollapse: "collapse" }}
+                    >
+                      <thead>
+                        <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                          <TH>Type</TH>
+                          <TH>Accuracy</TH>
+                          <TH>F1</TH>
+                          <TH>Rows</TH>
+                          <TH>Duration</TH>
+                          <TH>Date</TH>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {runs.map((r, i) => (
+                          <tr
+                            key={r.id}
+                            style={{
+                              borderBottom:
+                                i < runs.length - 1
+                                  ? "1px solid var(--border)"
+                                  : "none",
+                            }}
+                          >
+                            <TD>
+                              <Badge
+                                color={r.run_type === "full" ? "blue" : "amber"}
+                              >
+                                {r.run_type}
+                              </Badge>
+                            </TD>
+                            <TD>
+                              {r.accuracy != null
+                                ? `${(r.accuracy * 100).toFixed(1)}%`
+                                : "—"}
+                            </TD>
+                            <TD>
+                              {r.f1_score != null ? r.f1_score.toFixed(3) : "—"}
+                            </TD>
+                            <TD>{r.dataset_rows?.toLocaleString() ?? "—"}</TD>
+                            <TD>
+                              {r.duration_secs != null
+                                ? `${r.duration_secs}s`
+                                : "—"}
+                            </TD>
+                            <TD>{new Date(r.created_at).toLocaleString()}</TD>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              )}
+            </div>
+            {toast && (
+              <Toast
+                message={toast.message}
+                type={toast.type}
+                onClose={() => setToast(null)}
+              />
+            )}
+          </div>
+        );
+      }
+
+      function App() {
+        const [token, setToken] = useState(
+          () => sessionStorage.getItem("ml_token") || "",
+        );
+        const [username, setUsername] = useState(
+          () => sessionStorage.getItem("ml_user") || "",
+        );
+        function login(t, u) {
+          sessionStorage.setItem("ml_token", t);
+          sessionStorage.setItem("ml_user", u);
+          setToken(t);
+          setUsername(u);
+        }
+        function logout() {
+          sessionStorage.clear();
+          setToken("");
+          setUsername("");
+        }
+        return token ? (
+          <Dashboard token={token} username={username} onLogout={logout} />
+        ) : (
+          <Login onLogin={login} />
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+    </script>
+  </body>
+</html>

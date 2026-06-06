@@ -3,32 +3,40 @@ use actix_web::{post, web::Data, HttpRequest, HttpResponse, Responder};
 use futures_util::StreamExt;
 use crate::{AppState, auth::{bearer_from_header, verify_jwt}, user_service::{ADMIN, ML_ENGINEER}};
 
-#[post("/train")]
-pub async fn forward_train(
-    req: HttpRequest,
-    _db: Data<AppState>,
-    mut mp: Multipart,
-) -> impl Responder {
-    // 1. Verify JWT and check role
-    let token  = match bearer_from_header(&req) {
+fn auth_check(req: &HttpRequest) -> Result<crate::auth::Claims, HttpResponse> {
+    let token = match bearer_from_header(req) {
         Some(t) => t,
-        None    => return HttpResponse::Unauthorized()
-            .json(serde_json::json!({ "error": "Missing Authorization header" })),
+        None    => return Err(HttpResponse::Unauthorized()
+            .json(serde_json::json!({ "error": "Missing Authorization header" }))),
     };
     let claims = match verify_jwt(&token) {
         Ok(c)  => c,
-        Err(_) => return HttpResponse::Unauthorized()
-            .json(serde_json::json!({ "error": "Invalid or expired token" })),
+        Err(_) => return Err(HttpResponse::Unauthorized()
+            .json(serde_json::json!({ "error": "Invalid or expired token" }))),
+    };
+    if claims.role != ADMIN && claims.role != ML_ENGINEER {
+        return Err(HttpResponse::Forbidden()
+            .json(serde_json::json!({ "error": "ML_ENGINEER or ADMIN role required" })));
+    }
+    Ok(claims)
+}
+
+/// POST /train  — multipart: field "file" (CSV, optional) + field "model_name" (optional)
+/// If no CSV posted → training service uses its default dataset (fresh full train)
+/// If CSV posted    → trains on that data instead
+#[post("/train")]
+pub async fn forward_train(
+    req:    HttpRequest,
+    _db:    Data<AppState>,
+    mut mp: Multipart,
+) -> impl Responder {
+    let claims = match auth_check(&req) {
+        Ok(c)  => c,
+        Err(r) => return r,
     };
 
-    if claims.role != ADMIN && claims.role != ML_ENGINEER {
-        return HttpResponse::Forbidden()
-            .json(serde_json::json!({ "error": "ML_ENGINEER or ADMIN role required" }));
-    }
-
-    // 2. Pull CSV bytes from multipart field "file"
-    let mut csv_bytes: Vec<u8> = Vec::new();
-    let mut model_name: Option<String> = None;
+    let mut csv_bytes:  Vec<u8>         = Vec::new();
+    let mut model_name: Option<String>  = None;
 
     while let Some(Ok(mut field)) = mp.next().await {
         match field.name() {
@@ -42,13 +50,14 @@ pub async fn forward_train(
                 while let Some(Ok(chunk)) = field.next().await {
                     buf.extend_from_slice(&chunk);
                 }
-                model_name = String::from_utf8(buf).ok();
+                model_name = String::from_utf8(buf).ok()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty());
             }
             _ => {}
         }
     }
 
-    // 3. Parse CSV → JSON rows  (empty = use default dataset on training service)
     let rows: Option<Vec<serde_json::Value>> = if csv_bytes.is_empty() {
         None
     } else {
@@ -60,91 +69,58 @@ pub async fn forward_train(
 
         if parsed.is_empty() {
             return HttpResponse::BadRequest()
-                .json(serde_json::json!({ "error": "CSV parsed to 0 rows" }));
+                .json(serde_json::json!({ "error": "CSV parsed to 0 rows — check format" }));
         }
         Some(parsed)
     };
 
     let body = serde_json::json!({
-        "data":       rows,          // null = training service uses its default dataset
-        "model_name": model_name,    // null = train on top of active model
+        "data":       rows,
+        "model_name": model_name,
         "user_id":    claims.sub,
     });
 
-    // 4. Forward to training service (longer timeout — training takes time)
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
-        .build()
-        .unwrap();
-
-    match client
-        .post("http://training-service:8001/incremental-train")
-        .json(&body)
-        .send()
-        .await
-    {
-        Ok(resp) => {
-            let status = resp.status().as_u16();
-            let body   = resp.text().await.unwrap_or_default();
-            HttpResponse::build(
-                actix_web::http::StatusCode::from_u16(status).unwrap()
-            ).body(body)
-        }
-        Err(e) => HttpResponse::BadGateway()
-            .json(serde_json::json!({ "error": format!("{e}") })),
-    }
+    forward_to_training("http://training-service:8001/incremental-train", &body).await
 }
 
-
+/// POST /initBaseModel — trains a fresh model from the default dataset
+/// Used on first startup when no model exists yet
 #[post("/initBaseModel")]
 pub async fn init_base_model(
     req: HttpRequest,
     _db: Data<AppState>,
 ) -> impl Responder {
-    // 1. Verify JWT and check role
-    let token  = match bearer_from_header(&req) {
-        Some(t) => t,
-        None    => return HttpResponse::Unauthorized()
-            .json(serde_json::json!({ "error": "Missing Authorization header" })),
-    };
-    let claims = match verify_jwt(&token) {
+    let claims = match auth_check(&req) {
         Ok(c)  => c,
-        Err(_) => return HttpResponse::Unauthorized()
-            .json(serde_json::json!({ "error": "Invalid or expired token" })),
+        Err(r) => return r,
     };
-
-    if claims.role != ADMIN && claims.role != ML_ENGINEER {
-        return HttpResponse::Forbidden()
-            .json(serde_json::json!({ "error": "ML_ENGINEER or ADMIN role required" }));
-    }
 
     let body = serde_json::json!({
-        "data":       null,          // null = training service uses its default dataset
-        "model_name": null,    // null = train on top of active model
+        "data":       null,
+        "model_name": null,
         "user_id":    claims.sub,
     });
 
-    // 4. Forward to training service (longer timeout — training takes time)
+    log::info!("Base model init triggered by '{}'", claims.username);
+
+    forward_to_training("http://training-service:8001/train", &body).await
+}
+
+async fn forward_to_training(url: &str, body: &serde_json::Value) -> HttpResponse {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(120))
         .build()
         .unwrap();
 
-    match client
-        .post("http://training-service:8001/train")
-        .json(&body)
-        .send()
-        .await
-    {
+    match client.post(url).json(body).send().await {
         Ok(resp) => {
             let status = resp.status().as_u16();
             let body   = resp.text().await.unwrap_or_default();
             HttpResponse::build(
                 actix_web::http::StatusCode::from_u16(status).unwrap()
-            ).body(body)
+            ).content_type("application/json").body(body)
         }
         Err(e) => HttpResponse::BadGateway()
             .json(serde_json::json!({ "error": format!("{e}") })),
     }
 }
-

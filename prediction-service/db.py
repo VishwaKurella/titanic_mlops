@@ -4,7 +4,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from datetime import datetime, timezone
 import uuid, os
 
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://admin:password@postgres/mlplatform")
+DATABASE_URL = "postgresql://admin:password@postgres/mlplatform"
 engine       = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(bind=engine)
 

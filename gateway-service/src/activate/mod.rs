@@ -1,4 +1,4 @@
-use actix_web::{post, web::{Data, Path}, HttpRequest, HttpResponse, Responder};
+use actix_web::{get, post, web::{Data, Path}, HttpRequest, HttpResponse, Responder};
 use crate::{AppState, auth::{bearer_from_header, verify_jwt}, user_service::ADMIN};
 
 #[post("/{model_name}")]
@@ -7,7 +7,6 @@ pub async fn activate_model(
     db:         Data<AppState>,
     model_name: Path<String>,
 ) -> impl Responder {
-    // 1. Verify JWT
     let token  = match bearer_from_header(&req) {
         Some(t) => t,
         None    => return HttpResponse::Unauthorized()
@@ -19,7 +18,6 @@ pub async fn activate_model(
             .json(serde_json::json!({ "error": "Invalid or expired token" })),
     };
 
-    // 2. Check role
     if claims.role != ADMIN {
         return HttpResponse::Forbidden()
             .json(serde_json::json!({ "error": "Admin access required" }));
@@ -27,7 +25,6 @@ pub async fn activate_model(
 
     let model_name = model_name.into_inner();
 
-    // 3. Check model exists
     let exists = match sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS(SELECT 1 FROM models WHERE model_name = $1)",
     )
@@ -45,7 +42,6 @@ pub async fn activate_model(
             .json(serde_json::json!({ "error": "Model not found" }));
     }
 
-    // 4. Swap active model in a transaction
     let mut tx = match db.pool.begin().await {
         Ok(t)  => t,
         Err(_) => return HttpResponse::InternalServerError()
@@ -70,15 +66,91 @@ pub async fn activate_model(
             .json(serde_json::json!({ "error": "Failed to commit" }));
     }
 
-    // 5. Tell prediction service to drop its cached model
+    // Tell prediction service to clear its cache
     let _ = reqwest::Client::new()
         .post("http://prediction-service:8000/reload")
         .send()
         .await;
 
+    log::info!("Model '{}' activated by user '{}'", model_name, claims.sub);
+
     HttpResponse::Ok().json(serde_json::json!({
-        "status":     "activated",
-        "model_name": model_name,
-        "activated_by": claims.sub,
+        "status":       "activated",
+        "model_name":   model_name,
+        "activated_by": claims.username,
     }))
+}
+
+// Proxy to training service — ADMIN only
+#[get("/models")]
+pub async fn list_models(req: HttpRequest) -> impl Responder {
+    let token  = match bearer_from_header(&req) {
+        Some(t) => t,
+        None    => return HttpResponse::Unauthorized()
+            .json(serde_json::json!({ "error": "Missing Authorization header" })),
+    };
+    let claims = match verify_jwt(&token) {
+        Ok(c)  => c,
+        Err(_) => return HttpResponse::Unauthorized()
+            .json(serde_json::json!({ "error": "Invalid or expired token" })),
+    };
+
+    if claims.role != ADMIN {
+        return HttpResponse::Forbidden()
+            .json(serde_json::json!({ "error": "Admin access required" }));
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .unwrap();
+
+    match client
+        .get("http://training-service:8001/models")
+        .send()
+        .await
+    {
+        Ok(resp) => {
+            let status = resp.status().as_u16();
+            let body   = resp.text().await.unwrap_or_default();
+            HttpResponse::build(
+                actix_web::http::StatusCode::from_u16(status).unwrap()
+            ).content_type("application/json").body(body)
+        }
+        Err(e) => HttpResponse::BadGateway()
+            .json(serde_json::json!({ "error": format!("{e}") })),
+    }
+}
+
+#[get("/training-runs")]
+pub async fn list_training_runs(req: HttpRequest) -> impl Responder {
+    let token  = match bearer_from_header(&req) {
+        Some(t) => t,
+        None    => return HttpResponse::Unauthorized()
+            .json(serde_json::json!({ "error": "Missing Authorization header" })),
+    };
+    let claims = match verify_jwt(&token) {
+        Ok(c)  => c,
+        Err(_) => return HttpResponse::Unauthorized()
+            .json(serde_json::json!({ "error": "Invalid or expired token" })),
+    };
+    if claims.role != ADMIN {
+        return HttpResponse::Forbidden()
+            .json(serde_json::json!({ "error": "Admin access required" }));
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5)).build().unwrap();
+
+    match client.get("http://training-service:8001/training-runs").send().await {
+        Ok(resp) => {
+            let status = resp.status().as_u16();
+            let body   = resp.text().await.unwrap_or_default();
+            HttpResponse::build(
+                actix_web::http::StatusCode::from_u16(status).unwrap()
+            ).content_type("application/json").body(body)
+        }
+        Err(e) => HttpResponse::BadGateway()
+            .json(serde_json::json!({ "error": format!("{e}") })),
+    }
 }
