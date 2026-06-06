@@ -1,73 +1,64 @@
-use actix_web::{
-    post,
-    web,
-    App,
-    HttpResponse,
-    HttpServer,
-    Responder
-};
+use actix_cors::Cors;
+use actix_web::{middleware, web, App, HttpServer};
+use sqlx::PgPool;
 
+mod auth;
 mod activate;
-mod user_service;
 mod db;
+mod predict;
+mod train;
+mod user_service;
 
-use serde::{Deserialize, Serialize};
-
-#[derive(Serialize, Deserialize)]
-struct Passenger {
-    Pclass: i32,
-    Sex: String,
-    Age: f32,
-    Fare: f32,
-    Embarked: String,
+pub struct AppState {
+    pub pool: PgPool,
 }
-
-#[post("/predict")]
-async fn predict(
-    payload: web::Json<Passenger>
-) -> impl Responder {
-
-    let client = reqwest::Client::new();
-
-    let response = client
-        .post("http://prediction-service:8000/predict")
-        .json(&payload.0)
-        .send()
-        .await;
-
-    match response {
-
-        Ok(resp) => {
-
-            let body = resp.text().await.unwrap();
-
-            HttpResponse::Ok().body(body)
-        }
-
-        Err(e) => {
-
-            HttpResponse::InternalServerError()
-                .body(format!("{}", e))
-        }
-    }
-}
-
-
 
 #[actix_web::main]
-
 async fn main() -> std::io::Result<()> {
+    dotenvy::dotenv().ok();
+    env_logger::init_from_env(env_logger::Env::default().default_filter_or("info"));
 
-    HttpServer::new(|| {
-
+    let pool = db::create_pool().await;
+    log::info!("Gateway starting on 0.0.0.0:8080");
+    
+    HttpServer::new(move || {
         App::new()
-            .service(predict)
-
+            .wrap(
+                Cors::default()
+                .allow_any_origin()
+                .allow_any_method()
+                .allow_any_header()
+                .supports_credentials()
+            )
+            .wrap(middleware::Logger::new("%a \"%r\" %s %b %T"))
+            .app_data(web::Data::new(AppState { pool: pool.clone() }))
+            .app_data(
+                web::JsonConfig::default().error_handler(|err, _| {
+                    let msg = err.to_string();
+                    actix_web::error::InternalError::from_response(
+                        err,
+                        actix_web::HttpResponse::BadRequest()
+                            .json(serde_json::json!({ "error": msg })),
+                    ).into()
+                }),
+            )
+            // Auth
+            .service(web::scope("/auth").service(auth::login))
+            // Users
+            .service(web::scope("/user").service(user_service::create_user))
+            // Predict
+            .service(predict::forward_predict)
+            // Train
+            .service(train::forward_train)
+            .service(train::init_base_model)
+            // Activate + admin data routes
+            .service(web::scope("/activate").service(activate::activate_model))
+            .service(activate::list_models)
+            .service(activate::list_training_runs)
+            // Health
+            .service(predict::health)
     })
-
     .bind(("0.0.0.0", 8080))?
-
     .run()
-
     .await
 }
