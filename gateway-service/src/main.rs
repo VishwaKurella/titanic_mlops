@@ -1,73 +1,49 @@
-use actix_web::{
-    post,
-    web,
-    App,
-    HttpResponse,
-    HttpServer,
-    Responder
-};
+use actix_web::{web, App, HttpServer};
+use sqlx::PgPool;
 
+mod auth;
 mod activate;
-mod user_service;
 mod db;
+mod predict;
+mod train;
+mod user_service;
 
-use serde::{Deserialize, Serialize};
-
-#[derive(Serialize, Deserialize)]
-struct Passenger {
-    Pclass: i32,
-    Sex: String,
-    Age: f32,
-    Fare: f32,
-    Embarked: String,
+pub struct AppState {
+    pub pool: PgPool,
 }
-
-#[post("/predict")]
-async fn predict(
-    payload: web::Json<Passenger>
-) -> impl Responder {
-
-    let client = reqwest::Client::new();
-
-    let response = client
-        .post("http://prediction-service:8000/predict")
-        .json(&payload.0)
-        .send()
-        .await;
-
-    match response {
-
-        Ok(resp) => {
-
-            let body = resp.text().await.unwrap();
-
-            HttpResponse::Ok().body(body)
-        }
-
-        Err(e) => {
-
-            HttpResponse::InternalServerError()
-                .body(format!("{}", e))
-        }
-    }
-}
-
-
 
 #[actix_web::main]
-
 async fn main() -> std::io::Result<()> {
+    dotenvy::dotenv().ok();
 
-    HttpServer::new(|| {
+    let pool = db::create_pool().await;
 
+    HttpServer::new(move || {
         App::new()
-            .service(predict)
-
+            .app_data(web::Data::new(AppState { pool: pool.clone() }))
+            // Auth
+            .service(
+                web::scope("/auth")
+                    .service(auth::login)
+            )
+            // Users
+            .service(
+                web::scope("/user")
+                    .service(user_service::create_user)
+            )
+            // Predict — any logged-in user
+            .service(predict::forward_predict)
+            // Train — ML_ENGINEER or ADMIN only (checked inside handler)
+            .service(train::forward_train)
+            // Activate model — ADMIN only (checked inside handler)
+            .service(
+                web::scope("/activate")
+                    .service(activate::activate_model)
+            )
+            // Health
+            .service(predict::health)
     })
-
     .bind(("0.0.0.0", 8080))?
-
     .run()
-
     .await
 }

@@ -1,63 +1,66 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends, HTTPException
+from sqlalchemy.orm import Session
+import pandas as pd, joblib, os
 
-import pandas as pd
-import joblib
-import json
-import os
+from db import get_db, Model
 
-app = FastAPI()
-
+app        = FastAPI()
 MODELS_DIR = "/shared/models"
-METADATA_PATH = "/shared/metadata/models.json"
 
-# ======================================================
-# LOAD ACTIVE MODEL
-# ======================================================
+# ── In-memory cache — avoids reloading .pkl on every request ──────────────────
+_cache: dict = {"model": None, "name": None}
 
-def get_active_model():
+def get_active_model(db: Session):
+    record = db.query(Model).filter(Model.active == True).first()
+    if record is None:
+        return None, None
 
-    with open(METADATA_PATH, "r") as f:
+    if _cache["name"] != record.model_name:
+        path = os.path.join(MODELS_DIR, f"{record.model_name}.pkl")
+        if not os.path.exists(path):
+            raise HTTPException(404, f"Model file not found: {path}")
+        _cache["model"] = joblib.load(path)
+        _cache["name"]  = record.model_name
 
-        metadata = json.load(f)
+    return _cache["model"], record
 
-    active_model = metadata["active_model"]
-
-    if active_model is None:
-
-        return None
-
-    model_path = os.path.join(
-        MODELS_DIR,
-        active_model
-    )
-
-    return joblib.load(model_path)
-
-# ======================================================
-# PREDICT
-# ======================================================
+# ── POST /predict ──────────────────────────────────────────────────────────────
 
 @app.post("/predict")
-
-def predict(data: dict):
-
-    model = get_active_model()
+def predict(data: dict, db: Session = Depends(get_db)):
+    model, record = get_active_model(db)
 
     if model is None:
+        raise HTTPException(503, "No active model — trigger /train first")
 
-        return {
-            "error": "no active model"
-        }
-
-    df = pd.DataFrame([data])
-
-    prediction = model.predict(df)
-
-    probability = model.predict_proba(df)
+    try:
+        df          = pd.DataFrame([data])
+        prediction  = model.predict(df)
+        probability = model.predict_proba(df)
+    except Exception as e:
+        raise HTTPException(422, f"Prediction failed: {str(e)}")
 
     return {
+        "model_name":  record.model_name,
+        "model_id":    str(record.id),
+        "accuracy":    record.accuracy,
+        "prediction":  int(prediction[0]),
+        "probability": float(probability[0][1]),
+    }
 
-        "prediction": int(prediction[0]),
+# ── POST /reload — called by training service after saving a new model ─────────
 
-        "probability": float(probability[0][1])
+@app.post("/reload")
+def reload():
+    _cache["name"] = None  # next predict call will reload from disk
+    return {"status": "cache cleared"}
+
+# ── GET /health ────────────────────────────────────────────────────────────────
+
+@app.get("/health")
+def health(db: Session = Depends(get_db)):
+    record = db.query(Model).filter(Model.active == True).first()
+    return {
+        "status":       "ok",
+        "active_model": record.model_name if record else None,
     }
