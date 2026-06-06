@@ -35,6 +35,7 @@ async fn main() -> std::io::Result<()> {
             .service(predict::forward_predict)
             // Train — ML_ENGINEER or ADMIN only (checked inside handler)
             .service(train::forward_train)
+            .service(train::init_base_model)
             // Activate model — ADMIN only (checked inside handler)
             .service(
                 web::scope("/activate")

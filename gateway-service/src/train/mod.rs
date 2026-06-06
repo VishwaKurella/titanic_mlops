@@ -78,6 +78,59 @@ pub async fn forward_train(
         .unwrap();
 
     match client
+        .post("http://training-service:8001/incremental-train")
+        .json(&body)
+        .send()
+        .await
+    {
+        Ok(resp) => {
+            let status = resp.status().as_u16();
+            let body   = resp.text().await.unwrap_or_default();
+            HttpResponse::build(
+                actix_web::http::StatusCode::from_u16(status).unwrap()
+            ).body(body)
+        }
+        Err(e) => HttpResponse::BadGateway()
+            .json(serde_json::json!({ "error": format!("{e}") })),
+    }
+}
+
+
+#[post("/initBaseModel")]
+pub async fn init_base_model(
+    req: HttpRequest,
+    _db: Data<AppState>,
+) -> impl Responder {
+    // 1. Verify JWT and check role
+    let token  = match bearer_from_header(&req) {
+        Some(t) => t,
+        None    => return HttpResponse::Unauthorized()
+            .json(serde_json::json!({ "error": "Missing Authorization header" })),
+    };
+    let claims = match verify_jwt(&token) {
+        Ok(c)  => c,
+        Err(_) => return HttpResponse::Unauthorized()
+            .json(serde_json::json!({ "error": "Invalid or expired token" })),
+    };
+
+    if claims.role != ADMIN && claims.role != ML_ENGINEER {
+        return HttpResponse::Forbidden()
+            .json(serde_json::json!({ "error": "ML_ENGINEER or ADMIN role required" }));
+    }
+
+    let body = serde_json::json!({
+        "data":       null,          // null = training service uses its default dataset
+        "model_name": null,    // null = train on top of active model
+        "user_id":    claims.sub,
+    });
+
+    // 4. Forward to training service (longer timeout — training takes time)
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .unwrap();
+
+    match client
         .post("http://training-service:8001/train")
         .json(&body)
         .send()
@@ -94,3 +147,4 @@ pub async fn forward_train(
             .json(serde_json::json!({ "error": format!("{e}") })),
     }
 }
+

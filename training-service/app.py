@@ -63,8 +63,6 @@ def train(request: TrainRequest, db: Session = Depends(get_db)):
     duration = round(time.time() - start, 3)
     name     = request.model_name or next_version(db)
 
-    save_pkl(model, name)
-
     # Deactivate current active, insert new as active
     db.query(Model).filter(Model.active == True).update({"active": False})
 
@@ -87,6 +85,8 @@ def train(request: TrainRequest, db: Session = Depends(get_db)):
         f1_score      = metrics["f1_score"]
     ))
     db.commit()
+
+    save_pkl(model, name)
 
     notify_prediction_service()
 
@@ -128,8 +128,6 @@ def incremental_train(request: TrainRequest, db: Session = Depends(get_db)):
     duration = round(time.time() - start, 3)
     new_name = f"{record.model_name}_inc_{int(time.time())}"
 
-    save_pkl(model, new_name)
-
     db.query(Model).filter(Model.active == True).update({"active": False})
 
     new_record = Model(
@@ -147,9 +145,12 @@ def incremental_train(request: TrainRequest, db: Session = Depends(get_db)):
         dataset_rows  = len(df),
         duration_secs = duration,
         run_type      = "incremental",
-        **metrics,
+        accuracy      = metrics["accuracy"],
+        f1_score      = metrics["f1_score"]
     ))
     db.commit()
+
+    save_pkl(model, new_name)
 
     notify_prediction_service()
 
