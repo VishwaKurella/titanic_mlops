@@ -1,0 +1,40 @@
+services:
+  gateway-service:
+    build: ./gateway-service
+
+    ports:
+      - "8080:8080"
+
+    depends_on:
+      - prediction-service
+      - training-service
+      - postgres
+
+  prediction-service:
+    build: ./prediction-service
+
+    volumes:
+      - ./shared:/shared
+
+  training-service:
+    build: ./training-service
+
+    volumes:
+      - ./shared:/shared
+
+  postgres:
+    image: postgres:16
+
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: mlplatform
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
