@@ -46,7 +46,7 @@ VALUES
         "ADMIN"
     ),
     (
-        "modles_directory",
+        "models_directory",
         "/shared/models",
         "string",
         "All training models dataset directory",
