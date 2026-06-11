@@ -1,25 +1,7 @@
 use actix_multipart::Multipart;
 use actix_web::{post, web::Data, HttpRequest, HttpResponse, Responder};
 use futures_util::StreamExt;
-use crate::{AppState, auth::{bearer_from_header, verify_jwt}, user_service::{ADMIN, ML_ENGINEER}};
-
-fn auth_check(req: &HttpRequest) -> Result<crate::auth::Claims, HttpResponse> {
-    let token = match bearer_from_header(req) {
-        Some(t) => t,
-        None    => return Err(HttpResponse::Unauthorized()
-            .json(serde_json::json!({ "error": "Missing Authorization header" }))),
-    };
-    let claims = match verify_jwt(&token) {
-        Ok(c)  => c,
-        Err(_) => return Err(HttpResponse::Unauthorized()
-            .json(serde_json::json!({ "error": "Invalid or expired token" }))),
-    };
-    if claims.role != ADMIN && claims.role != ML_ENGINEER {
-        return Err(HttpResponse::Forbidden()
-            .json(serde_json::json!({ "error": "ML_ENGINEER or ADMIN role required" })));
-    }
-    Ok(claims)
-}
+use crate::{AppState, auth::{auth_check, bearer_from_header, verify_jwt}, user_service::{ADMIN, ML_ENGINEER}};
 
 /// POST /train — multipart fields:
 ///   "file"       CSV data (optional — uses default dataset if absent)
@@ -140,5 +122,29 @@ async fn forward_to_training(url: &str, body: &serde_json::Value) -> HttpRespons
         }
         Err(e) => HttpResponse::BadGateway()
             .json(serde_json::json!({ "error": format!("{e}") })),
+    }
+}
+
+#[post("/refresh-cache")]
+pub async fn refresh_cache(req:  HttpRequest) -> impl Responder{
+    let _: crate::auth::Claims = match auth_check(&req) {
+        Ok(c)  => c,
+        Err(r) => return r,
+    };
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .unwrap();
+    match client.post("http://training-service:8001/refresh-cache").send().await {
+        Ok(resp) => {
+            let status = resp.status().as_u16();
+            let body   = resp.text().await.unwrap_or_default();
+            HttpResponse::build(
+                actix_web::http::StatusCode::from_u16(status).unwrap()
+            ).content_type("application/json").body(body)
+        },
+        Err(e) => HttpResponse::BadGateway()
+            .json(serde_json::json!({ "error": format!("{e}") }))
     }
 }

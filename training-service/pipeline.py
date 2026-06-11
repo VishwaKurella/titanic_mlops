@@ -15,7 +15,7 @@ NUMERIC_FEATURES     = ["Age", "Fare", "Pclass", "FamilySize"]
 CATEGORICAL_FEATURES = ["Sex", "Embarked", "Title", "FareBand", "IsAlone"]
 FEATURES             = NUMERIC_FEATURES + CATEGORICAL_FEATURES
 TARGET               = "Survived"
-DEFAULT_DATASET      = "/shared/datasets/Titanic-Dataset.csv"
+# DEFAULT_DATASET      = "/shared/datasets/Titanic-Dataset.csv"
 
 # ── Model type registry ────────────────────────────────────────────────────────
 # Single source of truth for supported types and their capabilities.

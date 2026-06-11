@@ -1,9 +1,9 @@
-use actix_web::{post, web::{Data, Json}, HttpResponse, Responder};
+use actix_web::{HttpRequest, HttpResponse, Responder, post, web::{Data, Json}};
 use argon2::{Argon2, PasswordVerifier, password_hash::PasswordHash};
 use jsonwebtoken::{encode, decode, Header, EncodingKey, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use chrono::{Utc, Duration};
-use crate::AppState;
+use crate::{AppState, user_service::{ADMIN, ML_ENGINEER}};
 
 fn jwt_secret() -> Vec<u8> {
     std::env::var("JWT_SECRET")
@@ -120,4 +120,22 @@ pub fn bearer_from_header(req: &actix_web::HttpRequest) -> Option<String> {
         .ok()?
         .strip_prefix("Bearer ")
         .map(|s| s.to_string())
+}
+
+pub fn auth_check(req: &HttpRequest) -> Result<crate::auth::Claims, HttpResponse> {
+    let token = match bearer_from_header(req) {
+        Some(t) => t,
+        None    => return Err(HttpResponse::Unauthorized()
+            .json(serde_json::json!({ "error": "Missing Authorization header" }))),
+    };
+    let claims = match verify_jwt(&token) {
+        Ok(c)  => c,
+        Err(_) => return Err(HttpResponse::Unauthorized()
+            .json(serde_json::json!({ "error": "Invalid or expired token" }))),
+    };
+    if claims.role != ADMIN && claims.role != ML_ENGINEER {
+        return Err(HttpResponse::Forbidden()
+            .json(serde_json::json!({ "error": "ML_ENGINEER or ADMIN role required" })));
+    }
+    Ok(claims)
 }

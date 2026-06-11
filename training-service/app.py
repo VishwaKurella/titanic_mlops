@@ -12,16 +12,14 @@ from pipeline import (
     SUPPORTED_MODELS, INCREMENTAL_MODELS, supports_partial_fit,
 )
 
-CONFIG_CACHE = {}
+from config import load_config, get_config
 
 app = FastAPI()
 
 @app.on_event("startup")
-def startup():
-    db = SessionLocal()
-
+def startup(db: Session = Depends(get_db)):
     try:
-        load_general_config(db)
+        load_config(db)
     finally:
         db.close()
 
@@ -29,34 +27,6 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
 )
-
-# ── helpers ────────────────────────────────────────────────────────────────────
-
-def parse_value(value: str, value_type: str):
-    if value_type == "int":
-        return int(value)
-
-    if value_type == "float":
-        return float(value)
-
-    return value
-
-
-def load_general_config(db: Session):
-    global CONFIG_CACHE
-
-    rows = db.query(GeneralConfig).all()
-
-    CONFIG_CACHE = {
-        row.key: parse_value(row.value, row.value_type)
-        for row in rows
-    }
-
-    return CONFIG_CACHE
-
-
-def get_config(key: str, default=None):
-    return CONFIG_CACHE.get(key, default)
 
 def load_dataframe(data: list[dict] | None) -> pd.DataFrame:
     if data:
@@ -105,7 +75,13 @@ def train(request: TrainRequest, db: Session = Depends(get_db)):
     df = load_dataframe(request.data)
     if TARGET not in df.columns:
         raise HTTPException(422, f"Dataset must include '{TARGET}' column")
-
+    
+    try:
+        TEST_SIZE = get_config("test_split_ratio")
+        RANDOM_SEED = get_config("random_seed")
+    except RuntimeError as e:
+        raise HTTPException(500, f"Invalid Configuration: {str(e)}")
+    
     X, y = df[[c for c in RAW_INPUT_COLS if c in df.columns]], df[TARGET]
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=TEST_SIZE, random_state=RANDOM_SEED, stratify=y
@@ -209,7 +185,14 @@ def incremental_train(request: TrainRequest, db: Session = Depends(get_db)):
     df = load_dataframe(request.data)
     if TARGET not in df.columns:
         raise HTTPException(422, f"Dataset must include '{TARGET}' column")
-
+    
+    try:
+        TEST_SIZE = get_config("test_split_ratio")
+        RANDOM_SEED = get_config("random_seed")
+    except RuntimeError as e:
+        raise HTTPException(500, f"Invalid Configuration: {str(e)}")
+    
+    
     X, y = df[[c for c in RAW_INPUT_COLS if c in df.columns]], df[TARGET]
     if len(df) >= 10:
         X_train, X_test, y_train, y_test = train_test_split(
@@ -341,8 +324,7 @@ def supported_models():
 
 @app.post("/refresh")
 def reload_config(db: Session = Depends(get_db)):
-    global CONFIG_CACHE
-    CONFIG_CACHE = load_general_config(db)
+    get_config(db)
 
 
 @app.get("/health")

@@ -1,6 +1,6 @@
 use actix_web::{get, post, web::{Data, Json}, HttpRequest, HttpResponse, Responder};
 use serde::{Deserialize, Serialize};
-use crate::{AppState, auth::{bearer_from_header, verify_jwt}};
+use crate::{AppState, auth::{auth_check, bearer_from_header, verify_jwt}};
 
 /// Passenger input — all engineered features are derived server-side.
 /// Name, SibSp, Parch are optional for backward compatibility:
@@ -80,4 +80,28 @@ pub async fn forward_predict(
 #[get("/health")]
 pub async fn health() -> impl Responder {
     HttpResponse::Ok().json(serde_json::json!({ "status": "ok" }))
+}
+
+#[post("/refresh-cache")]
+pub async fn refresh_cache(req:  HttpRequest) -> impl Responder{
+    let _: crate::auth::Claims = match auth_check(&req) {
+        Ok(c)  => c,
+        Err(r) => return r,
+    };
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .unwrap();
+    match client.post("http://training-service:8001/refresh-cache").send().await {
+        Ok(resp) => {
+            let status = resp.status().as_u16();
+            let body   = resp.text().await.unwrap_or_default();
+            HttpResponse::build(
+                actix_web::http::StatusCode::from_u16(status).unwrap()
+            ).content_type("application/json").body(body)
+        },
+        Err(e) => HttpResponse::BadGateway()
+            .json(serde_json::json!({ "error": format!("{e}") }))
+    }
 }
