@@ -6,3 +6,4 @@ joblib
 psycopg2-binary
 sqlalchemy
 requests
+xgboost

@@ -5,3 +5,4 @@ scikit-learn
 joblib
 psycopg2-binary
 sqlalchemy
+xgboost

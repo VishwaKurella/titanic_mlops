@@ -1,0 +1,63 @@
+# docker-compose.override.yml
+# Automatically merged with docker-compose.yml by `docker compose up`.
+# Dev-only settings: relaxed healthchecks, exposed ports for debugging,
+# training-service port exposed so you can hit it directly with curl.
+
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432" # expose locally for psql/pgAdmin debugging
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-admin} -d ${POSTGRES_DB:-mlplatform}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  prediction-service:
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  training-service:
+    ports:
+      - "127.0.0.1:8001:8001" # expose locally for direct curl testing
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  gateway-service:
+    ports:
+      - "127.0.0.1:8080:8080"
+    healthcheck:
+      test: ["CMD", "/app/gateway-service", "--healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  admin-dashboard:
+    ports:
+      - "127.0.0.1:3000:3000"

@@ -1,0 +1,62 @@
+# docker-compose.prod.yml
+# Used explicitly: `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d`
+# Tighter healthchecks, no exposed debug ports, resource limits.
+
+services:
+  postgres:
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  prediction-service:
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  training-service:
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8001/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 1g # training needs more headroom for sklearn
+
+  gateway-service:
+    ports:
+      - "127.0.0.1:8080:8080" # still localhost — put nginx/caddy in front
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+
+  admin-dashboard:
+    ports:
+      - "127.0.0.1:3000:3000"
+    deploy:
+      resources:
+        limits:
+          memory: 64m # just nginx serving static files

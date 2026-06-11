@@ -1,0 +1,21 @@
+# Compiled artifacts — the biggest offender, can be several GB
+target/
+
+# Git history — no reason to send this to the build daemon
+.git
+.gitignore
+
+# Local env — never let secrets into a build context
+.env
+*.env
+
+# Editor/OS noise
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docs
+README.md
+docs/

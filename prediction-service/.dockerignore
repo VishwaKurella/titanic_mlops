@@ -1,0 +1,36 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Test/dev artifacts
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+*.egg-info/
+
+# Git
+.git
+.gitignore
+
+# Local env
+.env
+*.env
+
+# Editor/OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Docs
+README.md

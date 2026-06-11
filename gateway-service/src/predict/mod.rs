@@ -2,19 +2,40 @@ use actix_web::{get, post, web::{Data, Json}, HttpRequest, HttpResponse, Respond
 use serde::{Deserialize, Serialize};
 use crate::{AppState, auth::{bearer_from_header, verify_jwt}};
 
-// Field names must match exactly what the prediction service / pipeline expects
+/// Passenger input — all engineered features are derived server-side.
+/// Name, SibSp, Parch are optional for backward compatibility:
+///   - If Name is absent, Title is inferred from Sex + Age
+///   - If SibSp/Parch are absent, FamilySize defaults to 1 (travelling alone)
 #[derive(Serialize, Deserialize)]
 pub struct Passenger {
     #[serde(rename = "Pclass")]
-    pub pclass:   i32,
+    pub pclass: i32,
+
     #[serde(rename = "Sex")]
-    pub sex:      String,
+    pub sex: String,
+
     #[serde(rename = "Age")]
-    pub age:      Option<f32>,
+    pub age: Option<f32>,
+
     #[serde(rename = "Fare")]
-    pub fare:     Option<f32>,
+    pub fare: Option<f32>,
+
     #[serde(rename = "Embarked")]
     pub embarked: Option<String>,
+
+    // ── Feature-engineering inputs (optional) ────────────────────────────────
+    /// Full name e.g. "Braund, Mr. Owen Harris" — used to extract title.
+    /// If absent, title is inferred from Sex + Age.
+    #[serde(rename = "Name")]
+    pub name: Option<String>,
+
+    /// Number of siblings/spouses aboard (default 0)
+    #[serde(rename = "SibSp")]
+    pub sibsp: Option<i32>,
+
+    /// Number of parents/children aboard (default 0)
+    #[serde(rename = "Parch")]
+    pub parch: Option<i32>,
 }
 
 #[post("/predict")]
@@ -23,7 +44,7 @@ pub async fn forward_predict(
     _db:     Data<AppState>,
     payload: Json<Passenger>,
 ) -> impl Responder {
-    let token  = match bearer_from_header(&req) {
+    let token = match bearer_from_header(&req) {
         Some(t) => t,
         None    => return HttpResponse::Unauthorized()
             .json(serde_json::json!({ "error": "Missing Authorization header" })),

@@ -154,3 +154,25 @@ pub async fn list_training_runs(req: HttpRequest) -> impl Responder {
             .json(serde_json::json!({ "error": format!("{e}") })),
     }
 }
+
+// Add this to gateway-service/src/activate/mod.rs
+// Proxies to training-service — no auth required (just metadata)
+#[get("/supported-models")]
+pub async fn supported_models() -> impl Responder {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .unwrap();
+
+    match client.get("http://training-service:8001/supported-models").send().await {
+        Ok(resp) => {
+            let status = resp.status().as_u16();
+            let body   = resp.text().await.unwrap_or_default();
+            HttpResponse::build(
+                actix_web::http::StatusCode::from_u16(status).unwrap()
+            ).content_type("application/json").body(body)
+        }
+        Err(e) => HttpResponse::BadGateway()
+            .json(serde_json::json!({ "error": format!("{e}") })),
+    }
+}

@@ -15,6 +15,11 @@ pub struct AppState {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+
+    if std::env::args().any(|arg| arg == "--healthcheck") {
+        std::process::exit(0);
+    }
+
     dotenvy::dotenv().ok();
     env_logger::init_from_env(env_logger::Env::default().default_filter_or("info"));
 
@@ -55,6 +60,7 @@ async fn main() -> std::io::Result<()> {
             .service(web::scope("/activate").service(activate::activate_model))
             .service(activate::list_models)
             .service(activate::list_training_runs)
+            .service(activate::supported_models)
             // Health
             .service(predict::health)
     })

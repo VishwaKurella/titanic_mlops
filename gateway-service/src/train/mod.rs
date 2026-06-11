@@ -21,9 +21,11 @@ fn auth_check(req: &HttpRequest) -> Result<crate::auth::Claims, HttpResponse> {
     Ok(claims)
 }
 
-/// POST /train  — multipart: field "file" (CSV, optional) + field "model_name" (optional)
-/// If no CSV posted → training service uses its default dataset (fresh full train)
-/// If CSV posted    → trains on that data instead
+/// POST /train — multipart fields:
+///   "file"       CSV data (optional — uses default dataset if absent)
+///   "model_name" custom name for the model (optional)
+///   "model_type" one of: SGDClassifier, RandomForestClassifier, LogisticRegression
+///                (optional — defaults to SGDClassifier)
 #[post("/train")]
 pub async fn forward_train(
     req:    HttpRequest,
@@ -35,8 +37,9 @@ pub async fn forward_train(
         Err(r) => return r,
     };
 
-    let mut csv_bytes:  Vec<u8>         = Vec::new();
-    let mut model_name: Option<String>  = None;
+    let mut csv_bytes:  Vec<u8>        = Vec::new();
+    let mut model_name: Option<String> = None;
+    let mut model_type: Option<String> = None;
 
     while let Some(Ok(mut field)) = mp.next().await {
         match field.name() {
@@ -47,10 +50,15 @@ pub async fn forward_train(
             }
             Some("model_name") => {
                 let mut buf = Vec::new();
-                while let Some(Ok(chunk)) = field.next().await {
-                    buf.extend_from_slice(&chunk);
-                }
+                while let Some(Ok(chunk)) = field.next().await { buf.extend_from_slice(&chunk); }
                 model_name = String::from_utf8(buf).ok()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty());
+            }
+            Some("model_type") => {
+                let mut buf = Vec::new();
+                while let Some(Ok(chunk)) = field.next().await { buf.extend_from_slice(&chunk); }
+                model_type = String::from_utf8(buf).ok()
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty());
             }
@@ -66,7 +74,6 @@ pub async fn forward_train(
             .deserialize::<serde_json::Map<String, serde_json::Value>>()
             .filter_map(|r| r.ok().map(serde_json::Value::Object))
             .collect();
-
         if parsed.is_empty() {
             return HttpResponse::BadRequest()
                 .json(serde_json::json!({ "error": "CSV parsed to 0 rows — check format" }));
@@ -77,33 +84,44 @@ pub async fn forward_train(
     let body = serde_json::json!({
         "data":       rows,
         "model_name": model_name,
+        "model_type": model_type,
         "user_id":    claims.sub,
     });
 
     forward_to_training("http://training-service:8001/incremental-train", &body).await
 }
 
-/// POST /initBaseModel — trains a fresh model from the default dataset
-/// Used on first startup when no model exists yet
+/// POST /initBaseModel — full train from default dataset, defaults to SGDClassifier.
+/// Accepts optional JSON body: { "model_type": "RandomForestClassifier" }
 #[post("/initBaseModel")]
 pub async fn init_base_model(
-    req: HttpRequest,
-    _db: Data<AppState>,
+    req:  HttpRequest,
+    _db:  Data<AppState>,
+    body: actix_web::web::Json<serde_json::Value>,
 ) -> impl Responder {
     let claims = match auth_check(&req) {
         Ok(c)  => c,
         Err(r) => return r,
     };
 
-    let body = serde_json::json!({
+    let model_type = body.get("model_type")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let payload = serde_json::json!({
         "data":       null,
         "model_name": null,
+        "model_type": model_type,
         "user_id":    claims.sub,
     });
 
-    log::info!("Base model init triggered by '{}'", claims.username);
+    log::info!(
+        "Base model init triggered by '{}' (type: {})",
+        claims.username,
+        payload["model_type"]
+    );
 
-    forward_to_training("http://training-service:8001/train", &body).await
+    forward_to_training("http://training-service:8001/train", &payload).await
 }
 
 async fn forward_to_training(url: &str, body: &serde_json::Value) -> HttpResponse {

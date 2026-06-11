@@ -15,6 +15,8 @@
         --muted: #6b7280;
         --border: #e5e7eb;
         --accent: #4f46e5;
+        --good: #10b981;
+        --warn: #f59e0b;
       }
       @media (prefers-color-scheme: dark) {
         :root {
@@ -40,7 +42,8 @@
         color: var(--text);
       }
       input,
-      button {
+      button,
+      select {
         font-family: inherit;
       }
       @keyframes slideUp {
@@ -59,6 +62,7 @@
     <div id="root"></div>
     <script type="text/babel">
       const API = "http://localhost:8080";
+      const { useState, useEffect, useCallback } = React;
 
       const api = {
         async post(path, body, token) {
@@ -84,7 +88,64 @@
         },
       };
 
-      const { useState, useEffect, useCallback } = React;
+      const pct = (v) => (v != null ? `${(v * 100).toFixed(1)}%` : "—");
+      const f3 = (v) => (v != null ? v.toFixed(3) : "—");
+
+      const MODEL_COLORS = {
+        SGDClassifier: { bg: "#dbeafe", color: "#1e40af" },
+        RandomForestClassifier: { bg: "#d1fae5", color: "#065f46" },
+        LogisticRegression: { bg: "#fef3c7", color: "#92400e" },
+      };
+
+      function ModelTypeBadge({ type }) {
+        const style = MODEL_COLORS[type] || { bg: "#f3f4f6", color: "#374151" };
+        const short =
+          {
+            SGDClassifier: "SGD",
+            RandomForestClassifier: "RF",
+            LogisticRegression: "LR",
+          }[type] || type;
+        return (
+          <span
+            style={{
+              background: style.bg,
+              color: style.color,
+              padding: "2px 8px",
+              borderRadius: 10,
+              fontSize: 11,
+              fontWeight: 700,
+            }}
+          >
+            {short}
+          </span>
+        );
+      }
+
+      function GapBadge({ train, test }) {
+        if (train == null || test == null) return null;
+        const gap = train - test;
+        if (gap < 0.02)
+          return (
+            <span
+              style={{ fontSize: 11, color: "var(--good)", fontWeight: 600 }}
+            >
+              ✓ tight
+            </span>
+          );
+        if (gap < 0.06)
+          return (
+            <span
+              style={{ fontSize: 11, color: "var(--warn)", fontWeight: 600 }}
+            >
+              △ {(gap * 100).toFixed(1)}%
+            </span>
+          );
+        return (
+          <span style={{ fontSize: 11, color: "#ef4444", fontWeight: 600 }}>
+            ⚠ {(gap * 100).toFixed(1)}%
+          </span>
+        );
+      }
 
       function Badge({ color, children }) {
         const c = {
@@ -92,7 +153,6 @@
           gray: { background: "#f3f4f6", color: "#374151" },
           blue: { background: "#dbeafe", color: "#1e40af" },
           amber: { background: "#fef3c7", color: "#92400e" },
-          red: { background: "#fee2e2", color: "#991b1b" },
         };
         return (
           <span
@@ -111,7 +171,7 @@
 
       function Toast({ message, type, onClose }) {
         useEffect(() => {
-          const t = setTimeout(onClose, 3500);
+          const t = setTimeout(onClose, 4000);
           return () => clearTimeout(t);
         }, [onClose]);
         const c = { success: "#10b981", error: "#ef4444", info: "#3b82f6" };
@@ -170,16 +230,12 @@
         const [password, setPassword] = useState("");
         const [error, setError] = useState("");
         const [loading, setLoading] = useState(false);
-
         async function submit(e) {
           e.preventDefault();
           setLoading(true);
           setError("");
           try {
-            const d = await api.post("/auth/login", {
-              email: email,
-              password: password,
-            });
+            const d = await api.post("/auth/login", { email, password });
             if (d.role !== "ADMIN") {
               setError("Admin access required");
               return;
@@ -191,7 +247,6 @@
             setLoading(false);
           }
         }
-
         return (
           <div
             style={{
@@ -199,7 +254,6 @@
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              background: "var(--bg)",
             }}
           >
             <div
@@ -212,45 +266,18 @@
                 border: "1px solid var(--border)",
               }}
             >
-              <div style={{ marginBottom: 32 }}>
-                <div
-                  style={{
-                    width: 40,
-                    height: 40,
-                    background: "var(--accent)",
-                    borderRadius: 10,
-                    marginBottom: 16,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  <svg
-                    width="22"
-                    height="22"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="white"
-                    strokeWidth="2"
-                  >
-                    <path d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18" />
-                  </svg>
-                </div>
-                <h1
-                  style={{
-                    fontSize: 22,
-                    fontWeight: 700,
-                    color: "var(--text)",
-                  }}
-                >
-                  ML Platform
-                </h1>
-                <p
-                  style={{ marginTop: 6, color: "var(--muted)", fontSize: 14 }}
-                >
-                  Admin dashboard
-                </p>
-              </div>
+              <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 8 }}>
+                ML Platform
+              </h1>
+              <p
+                style={{
+                  color: "var(--muted)",
+                  fontSize: 14,
+                  marginBottom: 28,
+                }}
+              >
+                Admin dashboard
+              </p>
               {error && (
                 <div
                   style={{
@@ -308,8 +335,13 @@
         const [runs, setRuns] = useState([]);
         const [loading, setLoading] = useState(false);
         const [toast, setToast] = useState(null);
+        const [supportedModels, setSupportedModels] = useState({});
+
+        // Training actions state
+        const [initType, setInitType] = useState("SGDClassifier");
         const [initLoading, setInitLoading] = useState(false);
         const [csvFile, setCsvFile] = useState(null);
+        const [csvType, setCsvType] = useState("SGDClassifier");
         const [trainLoading, setTrainLoading] = useState(false);
 
         const toast_ = (m, t = "success") => setToast({ message: m, type: t });
@@ -334,10 +366,17 @@
           } catch (_) {}
         }, [token]);
 
+        const loadSupportedModels = useCallback(async () => {
+          try {
+            setSupportedModels(await api.get("/supported-models", token));
+          } catch (_) {}
+        }, [token]);
+
         useEffect(() => {
           loadModels();
           loadRuns();
-        }, [loadModels, loadRuns]);
+          loadSupportedModels();
+        }, [loadModels, loadRuns, loadSupportedModels]);
 
         async function activate(name) {
           try {
@@ -352,9 +391,13 @@
         async function initBase() {
           setInitLoading(true);
           try {
-            const d = await api.post("/initBaseModel", {}, token);
+            const d = await api.post(
+              "/initBaseModel",
+              { model_type: initType },
+              token,
+            );
             toast_(
-              `Trained: ${d.model_name} (${(d.accuracy * 100).toFixed(1)}% acc)`,
+              `${d.model_type} trained — test acc ${pct(d.test_accuracy)}`,
             );
             loadModels();
             loadRuns();
@@ -371,6 +414,7 @@
           try {
             const form = new FormData();
             form.append("file", csvFile);
+            form.append("model_type", csvType);
             const r = await fetch(`${API}/train`, {
               method: "POST",
               headers: { Authorization: `Bearer ${token}` },
@@ -379,7 +423,7 @@
             const d = await r.json().catch(() => ({}));
             if (!r.ok) throw new Error(d.error || r.statusText);
             toast_(
-              `Trained: ${d.model_name} (${(d.accuracy * 100).toFixed(1)}% acc)`,
+              `${d.model_type} trained — test acc ${pct(d.test_accuracy)}`,
             );
             setCsvFile(null);
             loadModels();
@@ -390,6 +434,31 @@
             setTrainLoading(false);
           }
         }
+
+        const modelTypeOptions =
+          Object.keys(supportedModels).length > 0
+            ? Object.entries(supportedModels).map(([k, v]) => ({
+                value: k,
+                label: k,
+                supportsIncremental: v.supports_partial_fit,
+              }))
+            : [
+                {
+                  value: "SGDClassifier",
+                  label: "SGDClassifier",
+                  supportsIncremental: true,
+                },
+                {
+                  value: "RandomForestClassifier",
+                  label: "RandomForestClassifier",
+                  supportsIncremental: false,
+                },
+                {
+                  value: "LogisticRegression",
+                  label: "LogisticRegression",
+                  supportsIncremental: false,
+                },
+              ];
 
         const active = models.find((m) => m.active);
 
@@ -421,6 +490,13 @@
           </td>
         );
 
+        const selectStyle = {
+          ...inp,
+          width: "auto",
+          padding: "8px 12px",
+          cursor: "pointer",
+        };
+
         return (
           <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
             {/* header */}
@@ -435,33 +511,7 @@
                 height: 60,
               }}
             >
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div
-                  style={{
-                    width: 28,
-                    height: 28,
-                    background: "var(--accent)",
-                    borderRadius: 7,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  <svg
-                    width="16"
-                    height="16"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="white"
-                    strokeWidth="2.2"
-                  >
-                    <path d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18" />
-                  </svg>
-                </div>
-                <span style={{ fontWeight: 700, fontSize: 15 }}>
-                  ML Platform
-                </span>
-              </div>
+              <span style={{ fontWeight: 700, fontSize: 15 }}>ML Platform</span>
               <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
                 <span style={{ fontSize: 13, color: "var(--muted)" }}>
                   Signed in as{" "}
@@ -484,7 +534,7 @@
             </div>
 
             <div
-              style={{ maxWidth: 1100, margin: "0 auto", padding: "32px 24px" }}
+              style={{ maxWidth: 1300, margin: "0 auto", padding: "32px 24px" }}
             >
               {/* summary cards */}
               <div
@@ -492,7 +542,7 @@
                   display: "grid",
                   gridTemplateColumns: "repeat(3,1fr)",
                   gap: 16,
-                  marginBottom: 32,
+                  marginBottom: 28,
                 }}
               >
                 {[
@@ -500,7 +550,7 @@
                     label: "Active model",
                     value: active?.model_name ?? "None",
                     sub: active
-                      ? `${(active.accuracy * 100).toFixed(1)}% accuracy`
+                      ? `${active.model_type} · Test ${pct(active.test_accuracy)}`
                       : "Run init base model",
                   },
                   {
@@ -558,7 +608,50 @@
                 ))}
               </div>
 
-              {/* actions */}
+              {/* overfitting legend */}
+              <div
+                style={{
+                  background: "var(--card)",
+                  borderRadius: 12,
+                  padding: "12px 20px",
+                  border: "1px solid var(--border)",
+                  marginBottom: 20,
+                  fontSize: 13,
+                  color: "var(--muted)",
+                  display: "flex",
+                  gap: 12,
+                  alignItems: "center",
+                }}
+              >
+                <span style={{ fontSize: 16 }}>ℹ️</span>
+                <span>
+                  <strong style={{ color: "var(--text)" }}>Gap</strong> = train
+                  acc − test acc. &nbsp;
+                  <span style={{ color: "var(--good)", fontWeight: 600 }}>
+                    ✓ tight
+                  </span>{" "}
+                  &lt;2% &nbsp;
+                  <span style={{ color: "var(--warn)", fontWeight: 600 }}>
+                    △ moderate
+                  </span>{" "}
+                  2–6% &nbsp;
+                  <span style={{ color: "#ef4444", fontWeight: 600 }}>
+                    ⚠ large
+                  </span>{" "}
+                  &gt;6% &nbsp;·&nbsp;
+                  <strong style={{ color: "var(--text)" }}>
+                    Model types:
+                  </strong>{" "}
+                  &nbsp;
+                  <ModelTypeBadge type="SGDClassifier" /> linear, incremental
+                  &nbsp;
+                  <ModelTypeBadge type="RandomForestClassifier" /> ensemble,
+                  best acc &nbsp;
+                  <ModelTypeBadge type="LogisticRegression" /> linear, stable
+                </span>
+              </div>
+
+              {/* training actions */}
               <div
                 style={{
                   background: "var(--card)",
@@ -574,18 +667,40 @@
                 <div
                   style={{
                     display: "flex",
-                    gap: 16,
+                    gap: 12,
                     flexWrap: "wrap",
                     alignItems: "center",
                   }}
                 >
+                  {/* init base model */}
+                  <select
+                    value={initType}
+                    onChange={(e) => setInitType(e.target.value)}
+                    style={selectStyle}
+                  >
+                    {modelTypeOptions.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
                   <button
                     onClick={initBase}
                     disabled={initLoading}
                     style={{ ...btn, opacity: initLoading ? 0.7 : 1 }}
                   >
-                    {initLoading ? "Training…" : "Init base model"}
+                    {initLoading ? "Training…" : "Init / full retrain"}
                   </button>
+
+                  <div
+                    style={{
+                      width: 1,
+                      height: 32,
+                      background: "var(--border)",
+                    }}
+                  />
+
+                  {/* csv train */}
                   <label
                     style={{
                       ...btn,
@@ -604,18 +719,32 @@
                     />
                   </label>
                   {csvFile && (
-                    <button
-                      onClick={trainCsv}
-                      disabled={trainLoading}
-                      style={{
-                        ...btn,
-                        background: "#059669",
-                        opacity: trainLoading ? 0.7 : 1,
-                      }}
-                    >
-                      {trainLoading ? "Training…" : "Train on CSV"}
-                    </button>
+                    <>
+                      <select
+                        value={csvType}
+                        onChange={(e) => setCsvType(e.target.value)}
+                        style={selectStyle}
+                      >
+                        {modelTypeOptions.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={trainCsv}
+                        disabled={trainLoading}
+                        style={{
+                          ...btn,
+                          background: "#059669",
+                          opacity: trainLoading ? 0.7 : 1,
+                        }}
+                      >
+                        {trainLoading ? "Training…" : "Train on CSV"}
+                      </button>
+                    </>
                   )}
+
                   <button
                     onClick={() => {
                       loadModels();
@@ -684,7 +813,8 @@
                         color: "var(--muted)",
                       }}
                     >
-                      No models yet. Click "Init base model" to start.
+                      No models yet. Select a type and click "Init / full
+                      retrain".
                     </div>
                   ) : (
                     <table
@@ -693,10 +823,14 @@
                       <thead>
                         <tr style={{ borderBottom: "1px solid var(--border)" }}>
                           <TH>Model name</TH>
+                          <TH>Type</TH>
                           <TH>Status</TH>
-                          <TH>Accuracy</TH>
-                          <TH>F1</TH>
-                          <TH>Rows</TH>
+                          <TH>Train acc</TH>
+                          <TH>Test acc</TH>
+                          <TH>Gap</TH>
+                          <TH>Train F1</TH>
+                          <TH>Test F1</TH>
+                          <TH>Rows (tr/te)</TH>
                           <TH>Created</TH>
                           <TH></TH>
                         </tr>
@@ -717,19 +851,30 @@
                           >
                             <TD mono>{m.model_name}</TD>
                             <TD>
+                              <ModelTypeBadge type={m.model_type} />
+                            </TD>
+                            <TD>
                               <Badge color={m.active ? "green" : "gray"}>
                                 {m.active ? "Active" : "Inactive"}
                               </Badge>
                             </TD>
+                            <TD>{pct(m.train_accuracy)}</TD>
                             <TD>
-                              {m.accuracy != null
-                                ? `${(m.accuracy * 100).toFixed(1)}%`
-                                : "—"}
+                              <strong>{pct(m.test_accuracy)}</strong>
                             </TD>
                             <TD>
-                              {m.f1_score != null ? m.f1_score.toFixed(3) : "—"}
+                              <GapBadge
+                                train={m.train_accuracy}
+                                test={m.test_accuracy}
+                              />
                             </TD>
-                            <TD>{m.training_rows?.toLocaleString() ?? "—"}</TD>
+                            <TD>{f3(m.train_f1)}</TD>
+                            <TD>
+                              <strong>{f3(m.test_f1)}</strong>
+                            </TD>
+                            <TD>
+                              {m.training_rows ?? "—"}/{m.test_rows ?? "—"}
+                            </TD>
                             <TD>{new Date(m.created_at).toLocaleString()}</TD>
                             <td style={{ padding: "13px 16px" }}>
                               {!m.active && (
@@ -785,9 +930,12 @@
                       <thead>
                         <tr style={{ borderBottom: "1px solid var(--border)" }}>
                           <TH>Type</TH>
-                          <TH>Accuracy</TH>
-                          <TH>F1</TH>
-                          <TH>Rows</TH>
+                          <TH>Train acc</TH>
+                          <TH>Test acc</TH>
+                          <TH>Gap</TH>
+                          <TH>Train F1</TH>
+                          <TH>Test F1</TH>
+                          <TH>Rows (tr/te)</TH>
                           <TH>Duration</TH>
                           <TH>Date</TH>
                         </tr>
@@ -810,15 +958,23 @@
                                 {r.run_type}
                               </Badge>
                             </TD>
+                            <TD>{pct(r.train_accuracy)}</TD>
                             <TD>
-                              {r.accuracy != null
-                                ? `${(r.accuracy * 100).toFixed(1)}%`
-                                : "—"}
+                              <strong>{pct(r.test_accuracy)}</strong>
                             </TD>
                             <TD>
-                              {r.f1_score != null ? r.f1_score.toFixed(3) : "—"}
+                              <GapBadge
+                                train={r.train_accuracy}
+                                test={r.test_accuracy}
+                              />
                             </TD>
-                            <TD>{r.dataset_rows?.toLocaleString() ?? "—"}</TD>
+                            <TD>{f3(r.train_f1)}</TD>
+                            <TD>
+                              <strong>{f3(r.test_f1)}</strong>
+                            </TD>
+                            <TD>
+                              {r.training_rows ?? "—"}/{r.test_rows ?? "—"}
+                            </TD>
                             <TD>
                               {r.duration_secs != null
                                 ? `${r.duration_secs}s`

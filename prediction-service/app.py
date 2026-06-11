@@ -10,29 +10,26 @@ MODELS_DIR = "/shared/models"
 # ── In-memory cache — avoids reloading .pkl on every request ──────────────────
 _cache: dict = {"model": None, "name": None}
 
+
 def get_active_model(db: Session):
     record = db.query(Model).filter(Model.active == True).first()
     if record is None:
         return None, None
-
     if _cache["name"] != record.model_name:
         path = os.path.join(MODELS_DIR, f"{record.model_name}.pkl")
         if not os.path.exists(path):
             raise HTTPException(404, f"Model file not found: {path}")
         _cache["model"] = joblib.load(path)
         _cache["name"]  = record.model_name
-
     return _cache["model"], record
 
-# ── POST /predict ──────────────────────────────────────────────────────────────
 
+# ── POST /predict ──────────────────────────────────────────────────────────────
 @app.post("/predict")
 def predict(data: dict, db: Session = Depends(get_db)):
     model, record = get_active_model(db)
-
     if model is None:
         raise HTTPException(503, "No active model — trigger /train first")
-
     try:
         df          = pd.DataFrame([data])
         prediction  = model.predict(df)
@@ -41,22 +38,22 @@ def predict(data: dict, db: Session = Depends(get_db)):
         raise HTTPException(422, f"Prediction failed: {str(e)}")
 
     return {
-        "model_name":  record.model_name,
-        "model_id":    str(record.id),
-        "accuracy":    record.accuracy,
-        "prediction":  int(prediction[0]),
-        "probability": float(probability[0][1]),
+        "model_name":    record.model_name,
+        "model_id":      str(record.id),
+        "test_accuracy": record.test_accuracy,   # honest metric shown to callers
+        "prediction":    int(prediction[0]),
+        "probability":   float(probability[0][1]),
     }
 
-# ── POST /reload — called by training service after saving a new model ─────────
 
+# ── POST /reload — called by training service after saving a new model ─────────
 @app.post("/reload")
 def reload():
     _cache["name"] = None  # next predict call will reload from disk
     return {"status": "cache cleared"}
 
-# ── GET /health ────────────────────────────────────────────────────────────────
 
+# ── GET /health ────────────────────────────────────────────────────────────────
 @app.get("/health")
 def health(db: Session = Depends(get_db)):
     record = db.query(Model).filter(Model.active == True).first()
