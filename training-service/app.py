@@ -53,7 +53,7 @@ def next_version(model_type: str) -> str:
 
 
 def save_pkl(model, name: str) -> str:
-    path = os.path.join(CONFIG_CACHE.get("modles_directory"), f"{name}.pkl")
+    path = os.path.join(CONFIG_CACHE.get("models_directory"), f"{name}.pkl")
     joblib.dump(model, path)
     return path
 

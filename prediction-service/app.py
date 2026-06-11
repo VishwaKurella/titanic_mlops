@@ -30,6 +30,10 @@ def predict(data: dict, db: Session = Depends(get_db)):
     model, record = get_active_model(db)
     if model is None:
         raise HTTPException(503, "No active model — trigger /train first")
+
+    # Basic sanity check: model.predict expects a DataFrame with required columns
+    if not isinstance(data, dict):
+        raise HTTPException(422, "Request body must be a JSON object (dict)")
     try:
         df          = pd.DataFrame([data])
         prediction  = model.predict(df)
