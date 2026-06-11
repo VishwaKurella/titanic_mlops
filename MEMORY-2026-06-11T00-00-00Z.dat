@@ -1,0 +1,37 @@
+# Project Memory (auto-created)
+# Timestamp: 2026-06-11T00-00-00Z
+
+## Repo summary (what’s currently present)
+- Root-level orchestration: docker-compose.yml (+ prod/override)
+- Services:
+  - postgres/ (init SQL: 01_schema.sql, 02_config_values.sql)
+  - training-service/ (FastAPI app.py + pipeline/db/schemas)
+  - prediction-service/ (FastAPI app.py + pipeline/db)
+  - gateway-service/ (Rust)
+  - admin-dashboard/ (React/Vite)
+
+## How model lifecycle currently works
+- training-service exposes endpoints (notably POST /train and POST /incremental-train).
+- training-service persists newly trained/updated models as .pkl into a shared volume path.
+- after training, training-service notifies prediction-service via HTTP POST:
+  - `http://prediction-service:8000/reload`
+- prediction-service keeps an in-memory cache:
+  - cache key tracks currently loaded model name
+  - GET/POST prediction uses the cached loaded model
+  - POST /reload clears cache so the next /predict reloads the .pkl from disk
+
+## Current todo.md
+- todo.md currently contains only:
+  1. prediction service
+  2. refresh cache
+
+## Notes / potential issues discovered during quick inspection
+- training-service/app.py contains a bug-looking path usage in `save_pkl()`:
+  - `CONFIG_CACHE.get("modles_directory")` (possible typo: should likely be "models_directory")
+
+## What to do next when continuing work
+- Open and review pipeline/db/schema files to confirm supported models and config keys.
+- Validate model save directory config key spelling in training-service.
+- Validate prediction-service model directory path alignment with docker-compose shared volume mount.
+
+
